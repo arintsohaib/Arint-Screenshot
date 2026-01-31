@@ -70,6 +70,11 @@ We believe your data belongs to you. Arint Screenshot is engineered with a **Pri
 | **Save Image** | `Ctrl` + `S` (Editor) |
 | **Undo / Redo** | `Ctrl` + `Z` / `Ctrl` + `Shift` + `Z` |
 
+## 🤝 Contributing
+
+Contributions, issues, and feature requests are welcome!
+Feel free to check the [issues page](https://github.com/arintsohaib/Arint-Screenshot/issues).
+
 ## License
 
-Copyright © 2026 Arint. All rights reserved.
+This project is open source and available under the [MIT License](LICENSE).
