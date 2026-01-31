@@ -51,7 +51,9 @@ We believe your data belongs to you. Arint Screenshot is engineered with a **Pri
 ## 🛠 Installation
 
 ### From Firefox Add-ons (Recommended)
-*(Link to AMO listing will be added here once published)*
+[![Get it on Firefox Add-ons](https://addons.mozilla.org/user-media/addon_icons/2816/2816098-64.png?modified=1769860000)](https://addons.mozilla.org/en-US/firefox/addon/arint-screenshot/)
+
+[**Download for Firefox**](https://addons.mozilla.org/en-US/firefox/addon/arint-screenshot/)
 
 ### Manual Installation (Developer Mode)
 1.  Clone this repository.
