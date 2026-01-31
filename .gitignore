@@ -1,0 +1,14 @@
+# System
+.DS_Store
+Thumbs.db
+
+# Build Artifacts
+*.zip
+arint-screenshot-submission.zip
+
+# Development
+TESTING_GUIDE.md
+IMPLEMENTATION_PLAN.md
+AMO_LISTING.md
+.vscode/
+node_modules/

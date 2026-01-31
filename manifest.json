@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "Arint Screenshot",
+  "version": "1.0.0",
+  "description": "A modern, privacy-focused screenshot tool with built-in editor. Capture full pages, visible areas, or custom regions.",
+  "author": "Arint",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "clipboardWrite"
+  ],
+  "background": {
+    "scripts": [
+      "src/arint-background.js"
+    ],
+    "type": "module"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    },
+    "default_title": "Arint Screenshot",
+    "default_popup": "src/popup/arint-popup.html"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/editor/arint-editor.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "arint-screenshot@arint.extension",
+      "strict_min_version": "109.0"
+    }
+  }
+}
