@@ -9,7 +9,7 @@
     Capture, Edit, and Save. 100% Local. Zero Tracking.
   </p>
 
-  [Features](#features) • [Privacy](#privacy-focus) • [Performance](#performance) • [Installation](#installation)
+  [Features](#-features) • [Privacy](#-privacy-focus) • [Performance](#-optimized-performance) • [Installation](#-installation)
 </div>
 
 ---
