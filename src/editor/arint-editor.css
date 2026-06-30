@@ -294,7 +294,7 @@ input[type="range"]::-webkit-slider-thumb {
 
 .canvas-container {
     flex: 1;
-    overflow: hidden;
+    overflow: auto;
     position: relative;
     background-color: var(--bg-dark);
     background-image:
@@ -321,6 +321,7 @@ input[type="range"]::-webkit-slider-thumb {
     display: block;
     background: white;
     max-width: none;
+    touch-action: none;
     /* Let sizes be set by JS */
 }
 
@@ -409,4 +410,65 @@ input[type="range"]::-webkit-slider-thumb {
 
 .cursor-grabbing {
     cursor: grabbing;
+}
+
+/* Responsive toolbar */
+@media (max-width: 900px) {
+    .toolbar {
+        height: auto;
+        min-height: 60px;
+        flex-wrap: wrap;
+        padding: 8px 12px;
+        gap: 8px;
+    }
+
+    .toolbar-brand {
+        min-width: auto;
+        font-size: 15px;
+    }
+
+    .toolbar-tools {
+        order: 3;
+        flex-basis: 100%;
+        justify-content: flex-start;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+        padding-bottom: 4px;
+    }
+
+    .toolbar-actions {
+        min-width: auto;
+        margin-left: auto;
+    }
+
+    .action-btn span {
+        display: none;
+    }
+
+    .action-btn {
+        padding: 8px;
+    }
+
+    .crop-bar {
+        top: auto;
+        bottom: 36px;
+        max-width: calc(100vw - 24px);
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 480px) {
+    .brand-name {
+        display: none;
+    }
+
+    .tool-options {
+        padding: 0 8px;
+    }
+
+    input[type="range"] {
+        width: 60px;
+    }
 }

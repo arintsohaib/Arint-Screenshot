@@ -6,12 +6,47 @@
 // Configuration
 const CONFIG = {
     MAX_PAGE_HEIGHT: 30000, // Maximum height to capture (pixels)
-    CAPTURE_DELAY: 100,     // Delay between scroll captures (ms)
-    EDITOR_URL: browser.runtime.getURL('src/editor/arint-editor.html')
+    CAPTURE_DELAY: 150,     // Delay between scroll captures (ms)
+    EDITOR_URL: browser.runtime.getURL('src/editor/arint-editor.html'),
+    PENDING_CAPTURE_KEY: 'arint_pending_capture'
 };
 
-// Temporary storage for captured images
+// Temporary storage for captured images (fallback if session storage unavailable)
 let pendingCapture = null;
+
+/**
+ * Store captured image for editor retrieval
+ * @param {string} imageData
+ */
+async function storePendingCapture(imageData) {
+    pendingCapture = imageData;
+    try {
+        await browser.storage.session.set({ [CONFIG.PENDING_CAPTURE_KEY]: imageData });
+    } catch (error) {
+        console.warn('Arint Screenshot: Session storage unavailable, using memory only', error);
+    }
+}
+
+/**
+ * Retrieve and clear pending capture
+ * @returns {Promise<string|null>}
+ */
+async function consumePendingCapture() {
+    let imageData = pendingCapture;
+
+    try {
+        const stored = await browser.storage.session.get(CONFIG.PENDING_CAPTURE_KEY);
+        if (stored[CONFIG.PENDING_CAPTURE_KEY]) {
+            imageData = stored[CONFIG.PENDING_CAPTURE_KEY];
+            await browser.storage.session.remove(CONFIG.PENDING_CAPTURE_KEY);
+        }
+    } catch (error) {
+        console.warn('Arint Screenshot: Failed to read session storage', error);
+    }
+
+    pendingCapture = null;
+    return imageData || null;
+}
 
 /**
  * Initialize extension
@@ -34,18 +69,21 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return true;
 
         case 'SELECTION_COMPLETE':
-            handleSelectionComplete(message.selection, sender.tab);
-            break;
+            handleSelectionComplete(message.selection, sender.tab)
+                .then(() => sendResponse({ success: true }))
+                .catch(error => sendResponse({ success: false, error: error.message }));
+            return true;
 
         case 'SELECTION_CANCELLED':
             console.log('Arint Screenshot: Selection cancelled');
+            sendResponse({ success: true });
             break;
 
         case 'GET_PENDING_CAPTURE':
-            // Editor requesting the captured image
-            sendResponse({ imageData: pendingCapture });
-            pendingCapture = null;
-            break;
+            consumePendingCapture()
+                .then(imageData => sendResponse({ imageData }))
+                .catch(error => sendResponse({ imageData: null, error: error.message }));
+            return true;
 
         case 'PAGE_DIMENSIONS':
             // Response from content script with page dimensions
@@ -62,28 +100,27 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
  * @param {object} tab - The active tab
  */
 async function handleCaptureRequest(action, tab) {
-    try {
-        // Get the active tab
-        const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+    const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
 
-        switch (action) {
-            case 'visible':
-                await captureVisibleArea(activeTab);
-                break;
+    if (!activeTab) {
+        throw new Error('No active tab found');
+    }
 
-            case 'fullpage':
-                await captureFullPage(activeTab);
-                break;
+    switch (action) {
+        case 'visible':
+            await captureVisibleArea(activeTab);
+            break;
 
-            case 'selection':
-                await initiateSelection(activeTab);
-                break;
+        case 'fullpage':
+            await captureFullPage(activeTab);
+            break;
 
-            default:
-                console.error('Arint Screenshot: Unknown action', action);
-        }
-    } catch (error) {
-        console.error('Arint Screenshot: Capture failed', error);
+        case 'selection':
+            await initiateSelection(activeTab);
+            break;
+
+        default:
+            throw new Error(`Unknown capture action: ${action}`);
     }
 }
 
@@ -111,8 +148,25 @@ async function captureVisibleArea(tab) {
  * @param {object} tab - The tab to capture
  */
 async function captureFullPage(tab) {
+    let scrollRestored = false;
+
+    const restoreScroll = async () => {
+        if (scrollRestored) return;
+        scrollRestored = true;
+        try {
+            await browser.scripting.executeScript({
+                target: { tabId: tab.id },
+                func: () => {
+                    window.scrollTo(0, window.__arintOriginalScroll || 0);
+                    delete window.__arintOriginalScroll;
+                }
+            });
+        } catch (error) {
+            console.warn('Arint Screenshot: Failed to restore scroll position', error);
+        }
+    };
+
     try {
-        // Inject helper to get page dimensions and control scrolling
         const [result] = await browser.scripting.executeScript({
             target: { tabId: tab.id },
             func: getPageDimensions
@@ -121,34 +175,28 @@ async function captureFullPage(tab) {
         const dimensions = result.result;
         console.log('Arint Screenshot: Page dimensions', dimensions);
 
-        // Calculate number of captures needed
         const viewportHeight = dimensions.viewportHeight;
         const totalHeight = Math.min(dimensions.scrollHeight, CONFIG.MAX_PAGE_HEIGHT);
         const captureCount = Math.ceil(totalHeight / viewportHeight);
 
-        // Store original scroll position
         await browser.scripting.executeScript({
             target: { tabId: tab.id },
             func: () => window.__arintOriginalScroll = window.scrollY
         });
 
-        // Capture each viewport segment
         const captures = [];
 
         for (let i = 0; i < captureCount; i++) {
             const scrollY = i * viewportHeight;
 
-            // Scroll to position
             await browser.scripting.executeScript({
                 target: { tabId: tab.id },
                 func: (y) => window.scrollTo(0, y),
                 args: [scrollY]
             });
 
-            // Wait for scroll and content to settle
             await delay(CONFIG.CAPTURE_DELAY);
 
-            // Capture visible viewport
             const imageData = await browser.tabs.captureVisibleTab(tab.windowId, {
                 format: 'png'
             });
@@ -160,21 +208,12 @@ async function captureFullPage(tab) {
             });
         }
 
-        // Restore original scroll position
-        await browser.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: () => {
-                window.scrollTo(0, window.__arintOriginalScroll || 0);
-                delete window.__arintOriginalScroll;
-            }
-        });
+        await restoreScroll();
 
-        // Stitch images together
         const stitchedImage = await stitchImages(captures, dimensions);
-
-        // Open editor with stitched image
         await openEditor(stitchedImage);
     } catch (error) {
+        await restoreScroll();
         console.error('Arint Screenshot: Full page capture failed', error);
         throw error;
     }
@@ -362,10 +401,8 @@ async function cropImage(imageData, selection) {
  * @param {string} imageData - Image data URL
  */
 async function openEditor(imageData) {
-    // Store image data for editor to retrieve
-    pendingCapture = imageData;
+    await storePendingCapture(imageData);
 
-    // Open editor in new tab
     await browser.tabs.create({
         url: CONFIG.EDITOR_URL,
         active: true
