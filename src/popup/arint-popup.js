@@ -6,31 +6,34 @@
 (function () {
   'use strict';
 
-  // DOM Elements
   const btnVisible = document.getElementById('btn-visible');
   const btnFullPage = document.getElementById('btn-fullpage');
   const btnSelection = document.getElementById('btn-selection');
+  const allButtons = [btnVisible, btnFullPage, btnSelection];
 
-  // Check if current page is supported
+  let isCapturing = false;
+
+  const RESTRICTED_PREFIXES = ['about:', 'moz-extension:', 'view-source:', 'chrome:', 'file:'];
+
+  function isRestrictedUrl(url) {
+    if (!url) return true;
+    return RESTRICTED_PREFIXES.some(prefix => url.startsWith(prefix));
+  }
+
   async function checkPageSupport() {
     try {
       const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
       if (!tab) return;
 
-      const isRestricted = tab.url.startsWith('about:') ||
-        tab.url.startsWith('moz-extension:') ||
-        tab.url.startsWith('view-source:') ||
-        tab.url.startsWith('chrome:');
+      if (isRestrictedUrl(tab.url)) {
+        const warning = document.createElement('div');
+        warning.className = 'page-warning';
+        warning.textContent = 'Cannot capture this page type';
+        document.querySelector('.popup-container').prepend(warning);
 
-      if (isRestricted) {
-        document.body.insertAdjacentHTML('afterbegin', `
-          <div style="background: #ef4444; color: white; padding: 8px; font-size: 12px; text-align: center; margin-bottom: 8px; border-radius: 4px;">
-            ⚠️ Cannot capture strict browser pages
-          </div>
-        `);
-        [btnFullPage, btnSelection].forEach(btn => {
-          btn.style.opacity = '0.5';
-          btn.style.pointerEvents = 'none';
+        allButtons.forEach(btn => {
+          btn.disabled = true;
+          btn.classList.add('disabled');
         });
       }
     } catch (e) {
@@ -38,61 +41,76 @@
     }
   }
 
-  checkPageSupport();
+  function setButtonsDisabled(disabled) {
+    allButtons.forEach(btn => {
+      btn.disabled = disabled;
+      btn.classList.toggle('disabled', disabled);
+    });
+  }
 
-  /**
-   * Send message to background script and close popup
-   * @param {string} action - The capture action type
-   */
   async function triggerCapture(action) {
+    if (isCapturing) return;
+
     const button = document.querySelector(`[data-action="${action}"]`);
+    const textSpan = button.querySelector('.btn-text');
+    const originalText = textSpan.textContent;
 
     try {
-      // Add loading state
+      isCapturing = true;
+      setButtonsDisabled(true);
       button.classList.add('loading');
+      textSpan.textContent = 'Capturing...';
 
-      // Send message to background script
       const response = await browser.runtime.sendMessage({
         type: 'CAPTURE_REQUEST',
         action: action
       });
 
       if (response && response.success) {
-        // Close popup only on success
         window.close();
-      } else {
-        throw new Error(response ? response.error : 'Unknown error');
+        return;
       }
+
+      throw new Error(response?.error || 'Capture failed');
     } catch (error) {
       console.error('Arint Screenshot: Capture failed', error);
       button.classList.remove('loading');
+      button.classList.add('error');
 
-      // Show error feedback
-      button.style.borderColor = '#ef4444';
-      button.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-
-      const originalText = button.querySelector('.btn-text').textContent;
-      const textSpan = button.querySelector('.btn-text');
-      textSpan.textContent = 'Failed: ' + error.message.substring(0, 15) + '...';
+      textSpan.textContent = 'Failed — try again';
 
       setTimeout(() => {
-        button.style.borderColor = '';
-        button.style.backgroundColor = '';
+        button.classList.remove('error');
         textSpan.textContent = originalText;
-      }, 3000);
+        setButtonsDisabled(false);
+        isCapturing = false;
+      }, 2500);
     }
   }
 
-  // Event Listeners
+  checkPageSupport();
+
   btnVisible.addEventListener('click', () => triggerCapture('visible'));
   btnFullPage.addEventListener('click', () => triggerCapture('fullpage'));
   btnSelection.addEventListener('click', () => triggerCapture('selection'));
 
-  // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
-    if (e.key === '1') triggerCapture('visible');
-    if (e.key === '2') triggerCapture('fullpage');
-    if (e.key === '3') triggerCapture('selection');
-    if (e.key === 'Escape') window.close();
+    if (isCapturing) return;
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    switch (e.key) {
+      case '1':
+        triggerCapture('visible');
+        break;
+      case '2':
+        triggerCapture('fullpage');
+        break;
+      case '3':
+        triggerCapture('selection');
+        break;
+      case 'Escape':
+        window.close();
+        break;
+    }
   });
 })();

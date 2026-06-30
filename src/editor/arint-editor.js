@@ -49,6 +49,9 @@
             this.panStart = { x: 0, y: 0 };
             this.scrollStart = { x: 0, y: 0 };
 
+            // Pointer tracking for mouse + touch
+            this.activePointerId = null;
+
             // Initialize
             this.init();
         }
@@ -66,22 +69,33 @@
          * Load the captured image from background script
          */
         async loadCapturedImage() {
-            try {
-                const response = await browser.runtime.sendMessage({
-                    type: 'GET_PENDING_CAPTURE'
-                });
+            const maxAttempts = 10;
+            const retryDelay = 150;
 
-                if (response && response.imageData) {
-                    await this.loadImage(response.imageData);
-                    this.showToast('Screenshot loaded', 'success');
-                } else {
-                    this.showToast('No screenshot data found', 'error');
-                    this.updateStatus('No image loaded');
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                try {
+                    const response = await browser.runtime.sendMessage({
+                        type: 'GET_PENDING_CAPTURE'
+                    });
+
+                    if (response && response.imageData) {
+                        await this.loadImage(response.imageData);
+                        this.showToast('Screenshot loaded', 'success');
+                        return;
+                    }
+                } catch (error) {
+                    console.error('Arint Editor: Failed to load image', error);
+                    this.showToast('Failed to load screenshot', 'error');
+                    return;
                 }
-            } catch (error) {
-                console.error('Arint Editor: Failed to load image', error);
-                this.showToast('Failed to load screenshot', 'error');
+
+                if (attempt < maxAttempts - 1) {
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                }
             }
+
+            this.showToast('No screenshot data found', 'error');
+            this.updateStatus('No image loaded');
         }
 
         /**
@@ -109,6 +123,7 @@
                     // Update UI
                     this.updateDimensions();
                     this.updateStatus('Ready');
+                    this.fitToView();
 
                     resolve();
                 };
@@ -129,6 +144,7 @@
             // Zoom buttons
             document.getElementById('zoom-in').addEventListener('click', () => this.zoomIn());
             document.getElementById('zoom-out').addEventListener('click', () => this.zoomOut());
+            document.getElementById('zoom-fit').addEventListener('click', () => this.fitToView());
             document.getElementById('zoom-reset').addEventListener('click', () => this.resetZoom());
 
             // Undo/Redo
@@ -152,11 +168,17 @@
             document.getElementById('crop-apply').addEventListener('click', () => this.applyCrop());
             document.getElementById('crop-cancel').addEventListener('click', () => this.cancelCrop());
 
-            // Canvas events
-            this.mainCanvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
-            this.mainCanvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
-            this.mainCanvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
-            this.mainCanvas.addEventListener('mouseleave', (e) => this.onMouseUp(e));
+            // Canvas events (mouse + touch via pointer events)
+            this.mainCanvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
+            this.mainCanvas.addEventListener('pointermove', (e) => this.onPointerMove(e));
+            this.mainCanvas.addEventListener('pointerup', (e) => this.onPointerUp(e));
+            this.mainCanvas.addEventListener('pointercancel', (e) => this.onPointerUp(e));
+            this.mainCanvas.addEventListener('pointerleave', (e) => {
+                if (this.activePointerId === e.pointerId) {
+                    this.onPointerUp(e);
+                }
+                this.updateCursorPosition(e);
+            });
 
             // Wheel zoom
             this.container.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
@@ -165,7 +187,10 @@
             document.addEventListener('keydown', (e) => this.onKeyDown(e));
 
             // Track cursor position
-            this.mainCanvas.addEventListener('mousemove', (e) => this.updateCursorPosition(e));
+            this.mainCanvas.addEventListener('pointermove', (e) => this.updateCursorPosition(e));
+
+            // Refit when window is resized
+            window.addEventListener('resize', () => this.debouncedFitToView());
         }
 
         /**
@@ -213,7 +238,7 @@
                     this.mainCanvas.classList.add('cursor-crosshair');
                     break;
                 case 'pen':
-                    this.mainCanvas.classList.add('cursor-crosshair');
+                    this.mainCanvas.classList.add('cursor-pen');
                     break;
                 case 'select':
                     this.mainCanvas.classList.add('cursor-grab');
@@ -222,10 +247,15 @@
         }
 
         // ============================================
-        // Mouse Event Handlers
+        // Pointer Event Handlers (mouse + touch)
         // ============================================
 
-        onMouseDown(e) {
+        onPointerDown(e) {
+            if (this.activePointerId !== null) return;
+
+            this.activePointerId = e.pointerId;
+            this.mainCanvas.setPointerCapture(e.pointerId);
+
             const coords = this.getCanvasCoordinates(e);
             if (!coords) return;
 
@@ -242,7 +272,9 @@
             }
         }
 
-        onMouseMove(e) {
+        onPointerMove(e) {
+            if (this.activePointerId !== null && e.pointerId !== this.activePointerId) return;
+
             const coords = this.getCanvasCoordinates(e);
             if (!coords) return;
 
@@ -284,7 +316,16 @@
             return { x, y };
         }
 
-        onMouseUp(e) {
+        onPointerUp(e) {
+            if (this.activePointerId !== null && e.pointerId !== this.activePointerId) return;
+
+            if (this.activePointerId !== null) {
+                try {
+                    this.mainCanvas.releasePointerCapture(this.activePointerId);
+                } catch (_) { /* already released */ }
+                this.activePointerId = null;
+            }
+
             switch (this.currentTool) {
                 case 'pen':
                     this.stopDrawing();
@@ -497,6 +538,26 @@
             this.setZoom(1);
         }
 
+        fitToView() {
+            if (!this.mainCanvas.width || !this.mainCanvas.height) return;
+
+            const padding = 48;
+            const availableWidth = Math.max(this.container.clientWidth - padding, 100);
+            const availableHeight = Math.max(this.container.clientHeight - padding, 100);
+            const scaleX = availableWidth / this.mainCanvas.width;
+            const scaleY = availableHeight / this.mainCanvas.height;
+            const fitZoom = Math.min(scaleX, scaleY, 1);
+
+            this.setZoom(fitZoom);
+            this.container.scrollLeft = 0;
+            this.container.scrollTop = 0;
+        }
+
+        debouncedFitToView() {
+            clearTimeout(this._fitTimeout);
+            this._fitTimeout = setTimeout(() => this.fitToView(), 150);
+        }
+
         setZoom(level) {
             this.zoom = Math.max(this.minZoom, Math.min(this.maxZoom, level));
 
@@ -535,11 +596,12 @@
                 height: this.mainCanvas.height
             });
 
+            this.historyIndex++;
+
             // Limit history size
             if (this.history.length > this.maxHistory) {
                 this.history.shift();
-            } else {
-                this.historyIndex++;
+                this.historyIndex--;
             }
 
             this.updateHistoryButtons();
@@ -659,6 +721,9 @@
                     break;
                 case '0':
                     this.resetZoom();
+                    break;
+                case 'f':
+                    this.fitToView();
                     break;
                 case 'escape':
                     if (this.currentTool === 'crop') {
